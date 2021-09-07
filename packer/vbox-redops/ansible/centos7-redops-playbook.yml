@@ -1,0 +1,226 @@
+---
+  - hosts: all
+    become: yes
+    gather_facts: no
+
+    tasks:
+  
+    - name: Import RPM Keys
+      rpm_key:
+        state: present
+        key: "{{ item }}"
+      loop:
+        - https://dl.fedoraproject.org/pub/epel/RPM-GPG-KEY-EPEL-7
+        - https://artifacts.elastic.co/GPG-KEY-elasticsearch
+
+    - name: Add EPEL Repository
+      yum:
+        name: epel-release
+
+
+    - name: Add Microsoft Repository
+      yum_repository:
+        name: packages-microsoft-com-prod
+        description: Microsoft Repo for RHEL-based
+        enabled: yes
+        gpgcheck: yes
+        baseurl: https://packages.microsoft.com/rhel/7/prod/
+        gpgkey: https://packages.microsoft.com/keys/microsoft.asc
+        file: prod
+
+    - name: Clean Yum Cache
+      command: yum clean all
+
+
+    - name: Install Dependencies for VirtualBox Guest Additions
+      yum:
+        name: "{{ packages }}"
+        state: present
+      vars:
+        packages:
+          - gcc
+          - kernel-headers
+          - kernel-devel
+          - make
+          - perl
+          - bzip2
+
+    - name: Install System Tools
+      yum:
+        name: "{{ packages }}"
+        state: present
+      vars:
+        packages:
+          - vim
+          - nano
+          - tmux
+          - git
+          - wget
+          - golang
+
+    - name: Start Firewalld Service
+      systemd:
+        name: firewalld
+        state: started
+        enabled: yes
+
+
+####################################
+# Install XCFE
+
+    - name: Install X Window System
+      command: yum groupinstall "X Window System" -y
+
+    - name: Install XFCE
+      command: yum groupinstall "Xfce" -y
+
+    - name: Set Graphic Target
+      file:
+        src: /usr/lib/systemd/system/graphical.target
+        dest: /etc/systemd/system/default.target
+        state: link
+
+
+#    - name: Reboot to set graphical target
+#      reboot:
+#        reboot_timeout: 300
+
+####################################
+# Operator 
+    - name: Add Pneuma Firewall Rule
+      firewalld:
+         zone: public
+         port: 2323/tcp
+         permanent: yes
+         immediate: yes
+         state: enabled
+
+    - name: Install XRDP
+      yum:
+        name: xrdp
+        state: present
+
+    - name: Add XRDP rule
+      firewalld:
+         zone: public
+         port: 3389/tcp
+         permanent: yes
+         immediate: yes
+         state: enabled
+
+    - name: Enabled XRDP
+      systemd:
+        name: xrdp
+        state: started
+        enabled: true
+
+    - name: Set SELinux Context on XRDP
+      command: chcon --type=bin_t /usr/sbin/xrdp
+
+    - name: Set SELinux Context on Sesman
+      command: chcon --type=bin_t /usr/sbin/xrdp-sesman
+
+
+###################################
+# Powershell
+###################################
+
+    - name: Install Powershell
+      yum:
+        name: powershell
+        state: present
+
+    - name: Enable Powershell Remoting
+      command: pwsh -Command {Enable-PSRemoting -Force}
+
+
+###################################
+# SSH Configuration
+###################################
+
+    - name: Uncomment Pass Auth Yes
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#PasswordAuthentication\s+yes'
+        line: PasswordAuthentication yes
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Comment out Passauth No
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^PasswordAuthentication\s+no'
+        line: '# PasswordAuthentication no'
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Allow SSH Pubkey Auth
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#PubkeyAuthentication\s+yes'
+        line: 'PubkeyAuthentication yes'
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Add PS Subsystem to PS remote over SSH
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        line: 'Subsystem powershell /usr/bin/pwsh -sshs -NoLogo'
+        create: yes
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Create Vagrant User SSH Directory
+      file:
+        path: /home/vagrant/.ssh
+        state: directory
+        owner: vagrant
+        mode: '0700'
+
+    - name: Retrieve Default Vagrant Pub Key
+      command: wget --no-check-certificate https://raw.github.com/mitchellh/vagrant/master/keys/vagrant.pub -O /home/vagrant/.ssh/authorized_keys
+
+    # - name: Copy Authorizedkeys File
+    #   copy:
+    #     src: ./files/authorizedkeys
+    #     dest: /home/vagrant/.ssh/authorizedkeys
+    #     owner: vagrant
+    #     group: vagrant
+    #     mode: '0600'
+  
+    - name: Update Permissions of SSH Key
+      file:
+        path: /home/vagrant/.ssh/authorized_keys
+        state: file
+        owner: vagrant
+        mode: '0600'
+  
+    - name: Add AuthorizedKeysFile to Config
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^AuthorizedKeysFile\s+\.ssh/authorized_keys'
+        line: 'AuthorizedKeysFile %h/.ssh/authorized_keys'
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Restart sshd service
+      systemd:
+        name: sshd
+        state: restarted
+        
+    - name: Mount Guest Additions ISO
+      mount:
+        path: /mnt/
+        src: /home/vagrant/VBoxGuestAdditions_6.1.26.iso
+        fstype: iso9660
+        opts: ro
+        state: mounted
+
+    - name: Install Guest Additions
+      shell: /mnt/VBoxLinuxAdditions.run
+     
