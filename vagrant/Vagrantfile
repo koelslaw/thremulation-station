@@ -96,6 +96,7 @@ Vagrant.configure("2") do |config|
         "FLEET_SERVER_URL" => "https://192.168.33.10:8220"
       }
     end
+  end
 
   config.vm.define "ts.redops" do |cfg|
     cfg.vm.box = "centos7-redops-box"
@@ -113,6 +114,5 @@ Vagrant.configure("2") do |config|
     end
     # Install Operator
     cfg.vm.provision "install-operator", type: "shell", path: "./scripts/install-operator.sh"
-    end
   end
 end
